@@ -27,6 +27,7 @@ class SampleApplication : Application() {
         // Shared OkHttpClient for both HTTP + WebSocket testing
         okHttpClient = OkHttpClient.Builder()
             .addInterceptor(Atlantis.getInterceptor())
+            .eventListenerFactory(Atlantis.getEventListenerFactory())
             .build()
     }
 }

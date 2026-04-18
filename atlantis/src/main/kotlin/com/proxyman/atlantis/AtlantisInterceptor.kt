@@ -10,7 +10,6 @@ import okio.BufferedSink
 import okio.GzipSource
 import java.io.IOException
 import java.nio.charset.Charset
-import java.util.UUID
 
 /**
  * OkHttp Interceptor that captures HTTP/HTTPS traffic and sends it to Proxyman
@@ -36,69 +35,76 @@ class AtlantisInterceptor internal constructor() : Interceptor {
     
     @Throws(IOException::class)
     override fun intercept(chain: Interceptor.Chain): Response {
+        val call = chain.call()
         val originalRequest = chain.request()
-        val requestId = UUID.randomUUID().toString()
-        val startTime = System.currentTimeMillis() / 1000.0
-        
-        // Wrap the request body to capture it as it's written (non-destructive)
-        var capturedRequestBody: ByteArray? = null
-        val requestToSend = if (originalRequest.body != null && canCaptureRequestBody(originalRequest.body!!)) {
-            val wrappedBody = CapturingRequestBody(originalRequest.body!!) { data ->
-                capturedRequestBody = data
-            }
-            originalRequest.newBuilder().method(originalRequest.method, wrappedBody).build()
-        } else {
-            originalRequest
-        }
-        
-        // Execute the request FIRST - this is the priority
-        // Atlantis should NEVER block or fail the actual HTTP request
-        val response: Response
+        val callTiming = CallTimingStore.resolveOrCreate(call)
+        val requestId = callTiming.requestId
+        val startTime = callTiming.startAt
+
         
         try {
-            response = chain.proceed(requestToSend)
-        } catch (e: IOException) {
-            // Request failed, but we still want to log it
-            // Create and send error package (best effort, ignore capture failures)
+            // Wrap the request body to capture it as it's written (non-destructive)
+            var capturedRequestBody: ByteArray? = null
+            val requestToSend = if (originalRequest.body != null && canCaptureRequestBody(originalRequest.body!!)) {
+                val wrappedBody = CapturingRequestBody(originalRequest.body!!) { data ->
+                    capturedRequestBody = data
+                }
+                originalRequest.newBuilder().method(originalRequest.method, wrappedBody).build()
+            } else {
+                originalRequest
+            }
+
+            // Execute the request FIRST - this is the priority
+            // Atlantis should NEVER block or fail the actual HTTP request
+            val response: Response
+
             try {
+                response = chain.proceed(requestToSend)
+            } catch (e: IOException) {
+                // Request failed, but we still want to log it
+                // Create and send error package (best effort, ignore capture failures)
+                try {
+                    val trafficPackage = TrafficPackage(
+                        id = requestId,
+                        startAt = startTime,
+                        request = captureRequestMetadata(originalRequest, capturedRequestBody),
+                        endAt = System.currentTimeMillis() / 1000.0,
+                        error = CustomError.fromException(e)
+                    )
+                    Atlantis.sendPackage(trafficPackage)
+                } catch (captureError: Exception) {
+                    // Silently ignore capture errors - never affect the app
+                }
+
+                throw e
+            }
+
+            // Skip WebSocket upgrade responses (101 Switching Protocols).
+            // WebSocket traffic is handled entirely by AtlantisWebSocketListener.
+            if (response.code == 101) {
+                return response
+            }
+
+            // Request succeeded, now capture the response (best effort)
+            try {
+                val (atlantisResponse, responseBodyData) = captureResponse(response)
                 val trafficPackage = TrafficPackage(
                     id = requestId,
                     startAt = startTime,
                     request = captureRequestMetadata(originalRequest, capturedRequestBody),
-                    endAt = System.currentTimeMillis() / 1000.0,
-                    error = CustomError.fromException(e)
+                    response = atlantisResponse,
+                    responseBodyData = responseBodyData,
+                    endAt = System.currentTimeMillis() / 1000.0
                 )
                 Atlantis.sendPackage(trafficPackage)
             } catch (captureError: Exception) {
                 // Silently ignore capture errors - never affect the app
             }
-            
-            throw e
-        }
-        
-        // Skip WebSocket upgrade responses (101 Switching Protocols).
-        // WebSocket traffic is handled entirely by AtlantisWebSocketListener.
-        if (response.code == 101) {
-            return response
-        }
 
-        // Request succeeded, now capture the response (best effort)
-        try {
-            val (atlantisResponse, responseBodyData) = captureResponse(response)
-            val trafficPackage = TrafficPackage(
-                id = requestId,
-                startAt = startTime,
-                request = captureRequestMetadata(originalRequest, capturedRequestBody),
-                response = atlantisResponse,
-                responseBodyData = responseBodyData,
-                endAt = System.currentTimeMillis() / 1000.0
-            )
-            Atlantis.sendPackage(trafficPackage)
-        } catch (captureError: Exception) {
-            // Silently ignore capture errors - never affect the app
+            return response
+        } finally {
+            CallTimingStore.remove(call)
         }
-        
-        return response
     }
     
     /**

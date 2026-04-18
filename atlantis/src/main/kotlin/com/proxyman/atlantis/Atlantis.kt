@@ -2,6 +2,7 @@ package com.proxyman.atlantis
 
 import android.content.Context
 import android.util.Log
+import okhttp3.EventListener
 import okhttp3.Headers
 import okhttp3.Request as OkHttpRequest
 import okhttp3.Response as OkHttpResponse
@@ -66,6 +67,7 @@ object Atlantis {
     
     private val isEnabled = AtomicBoolean(false)
     private val interceptor = AtlantisInterceptor()
+    private val eventListenerFactory = EventListener.Factory { AtlantisEventListener() }
 
     // MARK: - WebSocket caches (mirrors iOS Atlantis.swift)
 
@@ -135,6 +137,8 @@ object Atlantis {
             webSocketPackages.clear()
             waitingWebsocketPackages.clear()
         }
+
+        CallTimingStore.clear()
         
         Log.d(TAG, "Atlantis stopped")
     }
@@ -154,6 +158,26 @@ object Atlantis {
     @JvmStatic
     fun getInterceptor(): AtlantisInterceptor {
         return interceptor
+    }
+
+    /**
+     * Get an optional OkHttp EventListener.Factory for more accurate request timing.
+     *
+     * Usage:
+     * ```kotlin
+     * val client = OkHttpClient.Builder()
+     *     .addInterceptor(Atlantis.getInterceptor())
+     *     .eventListenerFactory(Atlantis.getEventListenerFactory())
+     *     .build()
+     * ```
+     *
+     * This improves duration accuracy by recording start time at the OkHttp call
+     * lifecycle boundary, closer to Atlantis iOS behavior. The interceptor remains
+     * fully functional without it.
+     */
+    @JvmStatic
+    fun getEventListenerFactory(): EventListener.Factory {
+        return eventListenerFactory
     }
     
     /**

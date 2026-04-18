@@ -93,8 +93,12 @@ class MyApplication : Application() {
 ```kotlin
 val okHttpClient = OkHttpClient.Builder()
     .addInterceptor(Atlantis.getInterceptor())
+    // Recommended for more accurate start/duration timing (iOS-style)
+    .eventListenerFactory(Atlantis.getEventListenerFactory())
     .build()
 ```
+
+`Atlantis.getInterceptor()` works on its own. `Atlantis.getEventListenerFactory()` is optional and improves HTTP duration accuracy by recording the request start earlier in the OkHttp call lifecycle.
 
 ### 3. Capture WebSocket Traffic (Optional)
 
