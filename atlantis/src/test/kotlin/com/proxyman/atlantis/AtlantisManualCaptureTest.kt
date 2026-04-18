@@ -90,11 +90,12 @@ class AtlantisManualCaptureTest {
 
     private fun captureManualPackage(responseBody: ByteArray? = null): TrafficPackage {
         val capturedPackage = AtomicReference<TrafficPackage?>()
-        Atlantis.setDelegate(object : AtlantisDelegate {
+        val delegate = object : AtlantisDelegate {
             override fun onTrafficCaptured(trafficPackage: TrafficPackage) {
                 capturedPackage.set(trafficPackage)
             }
-        })
+        }
+        Atlantis.setDelegate(delegate)
         setAtlantisRunning(true)
         setPrivateField("configuration", null)
         setPrivateField("transporter", null)

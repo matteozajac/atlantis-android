@@ -230,11 +230,8 @@ class AtlantisInterceptor internal constructor() : Interceptor {
                 buffer = decompressedBuffer
             }
             
-            if (CaptureBodyPolicy.isTooLarge(buffer.size)) {
-                return CaptureBodyPolicy.oversizedResponseBodyBytes()
-            }
-
-            buffer.readByteArray()
+            val size = minOf(buffer.size, CaptureBodyPolicy.MAX_BODY_SIZE_BYTES)
+            buffer.readByteArray(size)
         } catch (e: Exception) {
             // Return null on any error - don't break the response
             null

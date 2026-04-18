@@ -1,15 +1,20 @@
 package com.proxyman.atlantis
 
 import okhttp3.OkHttpClient
+import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
+import java.io.ByteArrayOutputStream
 import java.util.concurrent.TimeUnit
+import java.util.zip.GZIPOutputStream
 
 class AtlantisInterceptorTest {
     
@@ -168,6 +173,27 @@ class AtlantisInterceptorTest {
         assertEquals(200, response.code)
         assertEquals(largeBody.length, body?.length)
     }
+
+    @Test
+    fun `test interceptor truncates oversized gzipped response preview to 50MB`() {
+        val decompressedBody = ByteArray(CaptureBodyPolicy.MAX_BODY_SIZE_BYTES.toInt() + 1024) { 'A'.code.toByte() }
+        val compressedBody = gzip(decompressedBody)
+        val response = Response.Builder()
+            .request(Request.Builder().url("https://example.com/api/gzip-large").build())
+            .protocol(Protocol.HTTP_1_1)
+            .code(200)
+            .message("OK")
+            .addHeader("Content-Encoding", "gzip")
+            .body(compressedBody.toResponseBody())
+            .build()
+
+        val capturedBody = invokeCaptureResponseBody(response)
+
+        assertNotNull(capturedBody)
+        assertFalse(capturedBody!!.contentEquals(CaptureBodyPolicy.oversizedResponseBodyBytes()))
+        assertEquals(CaptureBodyPolicy.MAX_BODY_SIZE_BYTES.toInt(), capturedBody.size)
+        assertArrayEquals(decompressedBody.copyOf(CaptureBodyPolicy.MAX_BODY_SIZE_BYTES.toInt()), capturedBody)
+    }
     
     @Test
     fun `test interceptor handles redirect`() {
@@ -255,5 +281,17 @@ class AtlantisInterceptorTest {
         
         threads.forEach { it.start() }
         threads.forEach { it.join() }
+    }
+
+    private fun invokeCaptureResponseBody(response: Response): ByteArray? {
+        val method = AtlantisInterceptor::class.java.getDeclaredMethod("captureResponseBody", Response::class.java)
+        method.isAccessible = true
+        return method.invoke(interceptor, response) as ByteArray?
+    }
+
+    private fun gzip(data: ByteArray): ByteArray {
+        val outputStream = ByteArrayOutputStream()
+        GZIPOutputStream(outputStream).use { it.write(data) }
+        return outputStream.toByteArray()
     }
 }
