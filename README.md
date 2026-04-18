@@ -100,6 +100,17 @@ val okHttpClient = OkHttpClient.Builder()
 
 `Atlantis.getInterceptor()` works on its own. `Atlantis.getEventListenerFactory()` is optional and improves HTTP duration accuracy by recording the request start earlier in the OkHttp call lifecycle.
 
+If your app already installs an OkHttp `EventListener.Factory` for tracing, metrics, or APM, wrap it instead of replacing it:
+
+```kotlin
+val okHttpClient = OkHttpClient.Builder()
+    .addInterceptor(Atlantis.getInterceptor())
+    .eventListenerFactory(
+        Atlantis.getEventListenerFactory(existingEventListenerFactory)
+    )
+    .build()
+```
+
 ### 3. Capture WebSocket Traffic (Optional)
 
 Wrap your `WebSocketListener` with `Atlantis.wrapWebSocketListener()` to capture WebSocket messages:

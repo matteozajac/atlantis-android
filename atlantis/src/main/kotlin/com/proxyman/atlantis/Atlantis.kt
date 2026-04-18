@@ -137,8 +137,6 @@ object Atlantis {
             webSocketPackages.clear()
             waitingWebsocketPackages.clear()
         }
-
-        CallTimingStore.clear()
         
         Log.d(TAG, "Atlantis stopped")
     }
@@ -178,6 +176,20 @@ object Atlantis {
     @JvmStatic
     fun getEventListenerFactory(): EventListener.Factory {
         return eventListenerFactory
+    }
+
+    /**
+     * Wrap an existing OkHttp EventListener.Factory so Atlantis timing can coexist
+     * with app-installed tracing or metrics listeners.
+     */
+    @JvmStatic
+    fun getEventListenerFactory(delegateFactory: EventListener.Factory): EventListener.Factory {
+        return EventListener.Factory { call ->
+            CompositeAtlantisEventListener(
+                atlantisListener = AtlantisEventListener(),
+                delegateListener = delegateFactory.create(call)
+            )
+        }
     }
     
     /**
