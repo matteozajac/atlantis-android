@@ -31,7 +31,6 @@ class AtlantisInterceptor internal constructor() : Interceptor {
     
     companion object {
         private const val TAG = "AtlantisInterceptor"
-        private const val MAX_BODY_SIZE = 52428800L // 50MB
         private val UTF8 = Charset.forName("UTF-8")
     }
     
@@ -119,7 +118,7 @@ class AtlantisInterceptor internal constructor() : Interceptor {
         
         // Skip very large bodies
         val contentLength = body.contentLength()
-        if (contentLength > MAX_BODY_SIZE) {
+        if (CaptureBodyPolicy.isTooLarge(contentLength)) {
             return false
         }
         
@@ -196,11 +195,7 @@ class AtlantisInterceptor internal constructor() : Interceptor {
         
         // Capture body (best effort)
         val bodyData = captureResponseBody(response)
-        val bodyBase64 = if (bodyData != null && bodyData.isNotEmpty()) {
-            Base64Utils.encode(bodyData)
-        } else {
-            ""
-        }
+        val bodyBase64 = CaptureBodyPolicy.encodeResponseBody(bodyData)
         
         return Pair(atlantisResponse, bodyBase64)
     }
@@ -214,8 +209,8 @@ class AtlantisInterceptor internal constructor() : Interceptor {
         
         // Skip if body is too large
         val contentLength = responseBody.contentLength()
-        if (contentLength > MAX_BODY_SIZE) {
-            return "<Body too large>".toByteArray()
+        if (CaptureBodyPolicy.isTooLarge(contentLength)) {
+            return CaptureBodyPolicy.oversizedResponseBodyBytes()
         }
         
         return try {
@@ -235,9 +230,11 @@ class AtlantisInterceptor internal constructor() : Interceptor {
                 buffer = decompressedBuffer
             }
             
-            // Limit body size for safety
-            val size = minOf(buffer.size, MAX_BODY_SIZE)
-            buffer.readByteArray(size)
+            if (CaptureBodyPolicy.isTooLarge(buffer.size)) {
+                return CaptureBodyPolicy.oversizedResponseBodyBytes()
+            }
+
+            buffer.readByteArray()
         } catch (e: Exception) {
             // Return null on any error - don't break the response
             null

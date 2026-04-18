@@ -91,8 +91,6 @@ data class TrafficPackage(
     }
     
     companion object {
-        private const val MAX_BODY_SIZE = 52428800 // 50MB
-        
         /**
          * Create a new TrafficPackage with a unique ID
          */
@@ -189,8 +187,6 @@ data class Request(
     var body: String? = null // Base64 encoded
 ) {
     companion object {
-        private const val MAX_BODY_SIZE = 52428800 // 50MB
-        
         /**
          * Create from OkHttp request components
          */
@@ -201,7 +197,7 @@ data class Request(
             body: ByteArray?
         ): Request {
             val headerList = headers.map { Header(it.key, it.value) }
-            val bodyString = if (body != null && body.size <= MAX_BODY_SIZE) {
+            val bodyString = if (body != null && !CaptureBodyPolicy.isTooLarge(body.size.toLong())) {
                 Base64Utils.encode(body)
             } else {
                 null

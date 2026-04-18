@@ -7,6 +7,7 @@ import okhttp3.Request as OkHttpRequest
 import okhttp3.Response as OkHttpResponse
 import okhttp3.WebSocketListener
 import java.lang.ref.WeakReference
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -180,6 +181,60 @@ object Atlantis {
     @JvmStatic
     fun setConnectionListener(listener: Transporter.ConnectionListener?) {
         transporter?.connectionListener = listener
+    }
+
+    /**
+     * Manually add a synthetic HTTP request/response pair to Atlantis.
+     *
+     * This is useful for SDKs, wrappers, or custom transports that do not expose
+     * an OkHttp interceptor hook. Construct [Request] and [Response] using the
+     * existing [Request.fromOkHttp] and [Response.fromOkHttp] factories:
+     *
+     * ```kotlin
+     * val request = Request.fromOkHttp(
+     *     url = "https://example.com/functions/joinWedding",
+     *     method = "POST",
+     *     headers = mapOf("Content-Type" to "application/json"),
+     *     body = """{"weddingCode":"ABC123"}""".toByteArray()
+     * )
+     *
+     * val response = Response.fromOkHttp(
+     *     statusCode = 200,
+     *     headers = mapOf("Content-Type" to "application/json")
+     * )
+     *
+     * Atlantis.add(
+     *     request = request,
+     *     response = response,
+     *     responseBody = """{"success":true}""".toByteArray()
+     * )
+     * ```
+     *
+     * This is a best-effort API. If Atlantis is not running or capture fails,
+     * the host app is never affected.
+     */
+    @JvmStatic
+    @JvmOverloads
+    fun add(
+        request: Request,
+        response: Response,
+        responseBody: ByteArray? = null
+    ) {
+        if (!isEnabled.get()) {
+            return
+        }
+
+        try {
+            sendPackage(
+                createManualHttpTrafficPackage(
+                    request = request,
+                    response = response,
+                    responseBody = responseBody
+                )
+            )
+        } catch (_: Exception) {
+            // Best effort only - manual capture must never affect the host app.
+        }
     }
 
     /**
@@ -406,6 +461,27 @@ object Atlantis {
         messagesToSend.forEach { transporter.send(it) }
     }
 
+    private fun createManualHttpTrafficPackage(
+        request: Request,
+        response: Response,
+        responseBody: ByteArray?
+    ): TrafficPackage {
+        val now = System.currentTimeMillis() / 1000.0
+        return TrafficPackage(
+            id = UUID.randomUUID().toString(),
+            startAt = now,
+            request = request,
+            response = response,
+            responseBodyData = encodeManualResponseBodyData(responseBody),
+            endAt = now,
+            packageType = TrafficPackage.PackageType.HTTP
+        )
+    }
+
+    private fun encodeManualResponseBodyData(responseBody: ByteArray?): String {
+        return CaptureBodyPolicy.encodeResponseBody(responseBody)
+    }
+
     private fun headersToSingleValueMap(headers: Headers): Map<String, String> {
         if (headers.size == 0) return emptyMap()
         val map = LinkedHashMap<String, String>(headers.size)
@@ -450,4 +526,31 @@ interface AtlantisDelegate {
  */
 interface AtlantisWebSocketDelegate {
     fun onWebSocketMessageCaptured(trafficPackage: TrafficPackage)
+}
+
+internal object CaptureBodyPolicy {
+    const val MAX_BODY_SIZE_BYTES = 50L * 1024 * 1024
+    const val BODY_TOO_LARGE_SENTINEL = "<Body too large>"
+
+    fun isTooLarge(size: Long): Boolean {
+        return size > MAX_BODY_SIZE_BYTES
+    }
+
+    fun oversizedResponseBodyBytes(): ByteArray {
+        return BODY_TOO_LARGE_SENTINEL.toByteArray(Charsets.UTF_8)
+    }
+
+    fun encodeResponseBody(body: ByteArray?): String {
+        if (body == null || body.isEmpty()) {
+            return ""
+        }
+
+        val bytesToEncode: ByteArray = if (isTooLarge(body.size.toLong())) {
+            oversizedResponseBodyBytes()
+        } else {
+            body
+        }
+
+        return Base64Utils.encode(bytesToEncode)
+    }
 }

@@ -118,6 +118,36 @@ okHttpClient.newWebSocket(request, listener)
 
 Open Proxyman on your Mac, run your Android app, and watch the traffic appear!
 
+## Advanced Usage
+
+### Manual HTTP Capture
+
+If you need to capture traffic from an SDK, wrapper, or custom transport that does not expose an interceptor hook, you can manually send a synthetic request/response pair through Atlantis. This mirrors the iOS manual-add workflow and still emits a normal HTTP traffic message through the existing Atlantis pipeline.
+
+Build the request and response with the existing `fromOkHttp(...)` factories, then call `Atlantis.add(...)`:
+
+```kotlin
+val request = Request.fromOkHttp(
+    url = "https://example.com/functions/joinWedding",
+    method = "POST",
+    headers = mapOf("Content-Type" to "application/json"),
+    body = """{"weddingCode":"ABC123"}""".toByteArray()
+)
+
+val response = Response.fromOkHttp(
+    statusCode = 200,
+    headers = mapOf("Content-Type" to "application/json")
+)
+
+Atlantis.add(
+    request = request,
+    response = response,
+    responseBody = """{"success":true}""".toByteArray()
+)
+```
+
+`Atlantis.add(...)` is best effort and only captures traffic after `Atlantis.start(...)` has been called.
+
 ## Project Structure
 
 ```
